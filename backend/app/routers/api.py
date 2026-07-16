@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from ..deps import require_active_user
 from ..services.chat import handle_chat
 from ..services.broker import broker
 from ..services.market import analyze_cash, quote, signal_to_dict, WATCHLIST
@@ -59,39 +60,50 @@ def health():
 
 
 @router.post("/chat")
-async def chat(body: ChatIn):
-    return await handle_chat(body.message)
+async def chat(body: ChatIn, user=Depends(require_active_user)):
+    result = await handle_chat(body.message)
+    result["user"] = {
+        "name": user["name"],
+        "status": user["status"],
+        "days_left": user["days_left"],
+    }
+    return result
 
 
 @router.get("/quote/{symbol}")
-def get_quote(symbol: str):
+def get_quote(symbol: str, user=Depends(require_active_user)):
     return quote(symbol)
 
 
 @router.get("/signal/{symbol}")
-def get_signal(symbol: str, timeframe: str = "intraday"):
+def get_signal(symbol: str, timeframe: str = "intraday", user=Depends(require_active_user)):
     return signal_to_dict(analyze_cash(symbol, timeframe=timeframe))
 
 
 @router.get("/options/{symbol}")
-def get_options(symbol: str):
+def get_options(symbol: str, user=Depends(require_active_user)):
     return suggest_option_trade(symbol)
 
 
 @router.get("/greeks/{symbol}")
-def get_greeks(symbol: str, option_type: str = "CE", strike: float | None = None):
+def get_greeks(
+    symbol: str,
+    option_type: str = "CE",
+    strike: float | None = None,
+    user=Depends(require_active_user),
+):
     return explain_greeks_for_user(symbol, option_type=option_type, strike=strike)
 
 
 @router.get("/news")
-def get_news(symbol: str | None = None):
+def get_news(symbol: str | None = None, user=Depends(require_active_user)):
     if symbol:
         return news_impact_summary(symbol)
     return {"items": fetch_news(limit=15)}
 
 
 @router.get("/weekly")
-def get_weekly(top_n: int = 5):
+def get_weekly(top_n: int = 5, user=Depends(require_active_user)):
     return weekly_delivery_picks(top_n=top_n)
 
 
@@ -101,29 +113,29 @@ def get_watchlist():
 
 
 @router.get("/account")
-def get_account():
+def get_account(user=Depends(require_active_user)):
     return broker.account_summary()
 
 
 @router.get("/broker/status")
-def broker_status():
+def broker_status(user=Depends(require_active_user)):
     return broker.status()
 
 
 @router.post("/account/mode")
-def set_mode(body: ModeIn):
+def set_mode(body: ModeIn, user=Depends(require_active_user)):
     return broker.set_mode(body.mode)
 
 
 @router.post("/broker/active")
-def set_active_broker(body: ActiveBrokerIn):
+def set_active_broker(body: ActiveBrokerIn, user=Depends(require_active_user)):
     return broker.set_active_broker(body.broker)
 
 
 # ── Zerodha ─────────────────────────────────────────────────
 @router.get("/broker/zerodha/login")
 @router.get("/broker/kite/login")
-def kite_login():
+def kite_login(user=Depends(require_active_user)):
     return broker.kite_login_url()
 
 
@@ -150,13 +162,13 @@ def zerodha_callback(request_token: str = Query(...), status: str = "success"):
 
 
 @router.post("/broker/zerodha/session")
-def zerodha_session(body: KiteSessionIn):
+def zerodha_session(body: KiteSessionIn, user=Depends(require_active_user)):
     return broker.zerodha_exchange_token(body.request_token)
 
 
 @router.post("/broker/zerodha/link")
 @router.post("/broker/kite/link")
-def kite_link(body: KiteLinkIn):
+def kite_link(body: KiteLinkIn, user=Depends(require_active_user)):
     if body.request_token:
         return broker.zerodha_exchange_token(body.request_token)
     if not body.access_token:
@@ -165,36 +177,36 @@ def kite_link(body: KiteLinkIn):
 
 
 @router.get("/broker/zerodha/funds")
-def zerodha_funds():
+def zerodha_funds(user=Depends(require_active_user)):
     return broker.zerodha_funds()
 
 
 @router.get("/broker/zerodha/profile")
-def zerodha_profile():
+def zerodha_profile(user=Depends(require_active_user)):
     return broker.zerodha_profile()
 
 
 # ── Dhan ────────────────────────────────────────────────────
 @router.get("/broker/dhan/info")
-def dhan_info():
+def dhan_info(user=Depends(require_active_user)):
     return broker.dhan_connect_info()
 
 
 @router.post("/broker/dhan/link")
-def dhan_link(body: DhanLinkIn):
+def dhan_link(body: DhanLinkIn, user=Depends(require_active_user)):
     return broker.link_dhan_session(body.client_id, body.access_token)
 
 
 @router.get("/broker/dhan/funds")
-def dhan_funds():
+def dhan_funds(user=Depends(require_active_user)):
     return broker.dhan_funds()
 
 
 @router.get("/broker/dhan/positions")
-def dhan_positions():
+def dhan_positions(user=Depends(require_active_user)):
     return broker.dhan_positions()
 
 
 @router.post("/orders")
-def place_order(body: OrderIn):
+def place_order(body: OrderIn, user=Depends(require_active_user)):
     return broker.place_order(**body.model_dump())

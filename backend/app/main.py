@@ -8,7 +8,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .routers.api import router
+from .routers.auth import router as auth_router
 from .services.broker import init_db
+from .services.auth import init_auth_db
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
@@ -21,6 +23,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(auth_router)
 app.include_router(router)
 
 static_dir = FRONTEND / "static"
@@ -32,6 +35,7 @@ if static_dir.exists():
 @app.on_event("startup")
 def startup() -> None:
     init_db()
+    init_auth_db()
 
 
 @app.get("/", response_class=HTMLResponse)

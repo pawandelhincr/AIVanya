@@ -96,7 +96,23 @@ Agar port busy ho to `--port 8001` use karo.
 - `POST /api/orders`
 - `GET /api/account`
 
-## Important disclaimer
+## User accounts & subscription
+
+- **Signup** → automatic **7-day free trial**
+- After trial → **₹999 for 3 months** (AIVanya Pro)
+- Payment via **Razorpay** (set `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET`)
+- Without Razorpay keys, UI has **Demo activate** for local testing (`ALLOW_DEMO_SUBSCRIBE=true`)
+
+### Auth APIs
+
+- `POST /api/auth/register` `{name,email,password}`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/subscribe/checkout`
+- `POST /api/auth/subscribe/verify` (Razorpay signature)
+- `POST /api/auth/subscribe/activate-demo`
+
+Chat / signals / orders require `Authorization: Bearer <token>` and active trial/plan.
 
 Yeh tool **educational** hai. Signals guarantee nahi. Options / leverage se poora capital loss ho sakta hai. ~8% weekly return rare aur risky hai — hit-rate historical filter hai, promise nahi. Live trading se pehle paper practice + SEBI-registered advisor.
 

@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     weekly_target_return_pct: float = 8.0
     paper_starting_cash: float = 500000.0
 
+    # Auth / subscription
+    trial_days: int = 7
+    plan_price_inr: int = 999
+    plan_days: int = 90
+    allow_demo_subscribe: bool = True  # local testing without Razorpay
+
+    # Razorpay (optional — https://dashboard.razorpay.com/)
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
 
     class Config:

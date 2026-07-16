@@ -3,30 +3,89 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TradeMind — AI Trading Bot</title>
+  <title>AIVanya — AI Trading Bot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
-  <div class="app">
+
+  <div id="auth-gate" class="auth-gate hidden">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">AV</span>
+        <div>
+          <h1>AIVanya</h1>
+          <p>1 week free trial · then ₹999 / 3 months</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs">
+        <button type="button" class="tab on" data-tab="login">Login</button>
+        <button type="button" class="tab" data-tab="register">Start free trial</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <label>Email<input type="email" name="email" required placeholder="you@email.com" /></label>
+        <label>Password<input type="password" name="password" required minlength="6" /></label>
+        <button type="submit">Login</button>
+        <p class="auth-err" id="login-err"></p>
+      </form>
+
+      <form id="register-form" class="auth-form hidden">
+        <label>Name<input type="text" name="name" required minlength="2" placeholder="Your name" /></label>
+        <label>Email<input type="email" name="email" required placeholder="you@email.com" /></label>
+        <label>Password<input type="password" name="password" required minlength="6" placeholder="min 6 chars" /></label>
+        <button type="submit">Create account · 7-day trial</button>
+        <p class="auth-hint">Trial ke baad Pro: <strong>₹999 for 3 months</strong></p>
+        <p class="auth-err" id="register-err"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="paywall" class="auth-gate hidden">
+    <div class="auth-card">
+      <h2>Trial / plan expired</h2>
+      <p class="pay-copy">AIVanya Pro unlock karo — cash, options, news, weekly picks, broker desk.</p>
+      <div class="price-box">
+        <div class="price">₹999</div>
+        <div class="price-sub">for 3 months</div>
+      </div>
+      <button type="button" id="btn-pay" class="pay-btn">Pay ₹999 · Activate Pro</button>
+      <button type="button" id="btn-demo-pay" class="mini full">Demo activate (no Razorpay keys)</button>
+      <button type="button" id="btn-logout-pay" class="linkish">Logout</button>
+      <p class="auth-err" id="pay-err"></p>
+    </div>
+  </div>
+
+  <div class="app" id="app-shell">
     <aside class="rail">
       <div class="brand">
-        <span class="brand-mark">TM</span>
+        <span class="brand-mark">AV</span>
         <div>
-          <h1>TradeMind</h1>
+          <h1>AIVanya</h1>
           <p>Cash · Options · Delivery</p>
         </div>
       </div>
+
+      <section class="panel" id="sub-panel">
+        <h2>Subscription</h2>
+        <div id="sub-box" class="account-box">—</div>
+        <div class="broker-actions">
+          <button type="button" id="btn-upgrade" class="mini">Upgrade ₹999</button>
+          <button type="button" id="btn-logout" class="mini">Logout</button>
+        </div>
+      </section>
 
       <nav class="quick">
         <button type="button" data-q="RELIANCE buy karna chahiye?">Cash signal</button>
         <button type="button" data-q="NIFTY options">Options + Greeks</button>
         <button type="button" data-q="weekly stocks">Weekly ~8%</button>
         <button type="button" data-q="market news">News impact</button>
-        <button type="button" data-q="account">Account</button>
+        <button type="button" data-q="account">Broker account</button>
         <button type="button" data-q="connect zerodha">Connect Zerodha</button>
         <button type="button" data-q="connect dhan">Connect Dhan</button>
       </nav>
@@ -41,7 +100,7 @@
       </section>
 
       <section class="panel" id="account-panel">
-        <h2>Account</h2>
+        <h2>Trading desk</h2>
         <div id="account-box" class="account-box">Loading…</div>
       </section>
 
@@ -58,7 +117,6 @@
       </header>
 
       <div id="messages" class="messages" role="log" aria-live="polite"></div>
-
       <div id="chips" class="chips"></div>
 
       <form id="composer" class="composer">
