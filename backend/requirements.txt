@@ -1,0 +1,17 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+yfinance==0.2.51
+pandas==2.2.3
+numpy==2.2.1
+ta==0.11.0
+httpx==0.28.1
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-dotenv==1.0.1
+feedparser==6.0.11
+scipy==1.14.1
+jinja2==3.1.5
+python-multipart==0.0.20
+kiteconnect==5.0.1
+dhanhq>=2.0.0
+aiosqlite==0.20.0

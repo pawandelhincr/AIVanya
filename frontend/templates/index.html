@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TradeMind — AI Trading Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark">TM</span>
+        <div>
+          <h1>TradeMind</h1>
+          <p>Cash · Options · Delivery</p>
+        </div>
+      </div>
+
+      <nav class="quick">
+        <button type="button" data-q="RELIANCE buy karna chahiye?">Cash signal</button>
+        <button type="button" data-q="NIFTY options">Options + Greeks</button>
+        <button type="button" data-q="weekly stocks">Weekly ~8%</button>
+        <button type="button" data-q="market news">News impact</button>
+        <button type="button" data-q="account">Account</button>
+        <button type="button" data-q="connect zerodha">Connect Zerodha</button>
+        <button type="button" data-q="connect dhan">Connect Dhan</button>
+      </nav>
+
+      <section class="panel" id="broker-panel">
+        <h2>Brokers</h2>
+        <div id="broker-box" class="account-box">Loading…</div>
+        <div class="broker-actions">
+          <button type="button" id="btn-zerodha" class="mini">Zerodha login</button>
+          <button type="button" id="btn-dhan" class="mini">Dhan guide</button>
+        </div>
+      </section>
+
+      <section class="panel" id="account-panel">
+        <h2>Account</h2>
+        <div id="account-box" class="account-box">Loading…</div>
+      </section>
+
+      <p class="fineprint">Educational tool only. Not SEBI advice. Markets can wipe capital.</p>
+    </aside>
+
+    <main class="chat-shell">
+      <header class="chat-head">
+        <div>
+          <h2>Trading desk chat</h2>
+          <p>Intraday cash/options, news, Greeks, weekly delivery ideas, paper or live orders</p>
+        </div>
+        <div class="mode-pill" id="mode-pill">PAPER</div>
+      </header>
+
+      <div id="messages" class="messages" role="log" aria-live="polite"></div>
+
+      <div id="chips" class="chips"></div>
+
+      <form id="composer" class="composer">
+        <input
+          id="input"
+          type="text"
+          autocomplete="off"
+          placeholder="Poochiye: INFY buy? · BANKNIFTY options · buy 10 SBIN · weekly stocks"
+        />
+        <button type="submit" id="send">Send</button>
+      </form>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
