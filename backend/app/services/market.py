@@ -195,6 +195,10 @@ def fetch_ohlcv(symbol: str, period: str = "3mo", interval: str = "1d") -> pd.Da
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
+    # Index feeds often have 0 volume — replace so OBV/VWAP don't NaN everything
+    if "Volume" in out.columns:
+        out["Volume"] = out["Volume"].replace(0, np.nan).ffill().bfill().fillna(1)
+
     close = out["Close"]
     high = out["High"]
     low = out["Low"]
@@ -202,7 +206,11 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     out["ema9"] = EMAIndicator(close, 9).ema_indicator()
     out["ema21"] = EMAIndicator(close, 21).ema_indicator()
-    out["ema50"] = EMAIndicator(close, 50).ema_indicator()
+    if len(out) >= 55:
+        out["ema50"] = EMAIndicator(close, 50).ema_indicator()
+    else:
+        out["ema50"] = EMAIndicator(close, max(9, len(out) // 3)).ema_indicator()
+
     macd = MACD(close)
     out["macd"] = macd.macd()
     out["macd_signal"] = macd.macd_signal()
@@ -216,33 +224,61 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["bb_low"] = bb.bollinger_lband()
     out["bb_mid"] = bb.bollinger_mavg()
     out["atr"] = AverageTrueRange(high, low, close, 14).average_true_range()
-    out["adx"] = ADXIndicator(high, low, close, 14).adx()
+    try:
+        out["adx"] = ADXIndicator(high, low, close, 14).adx()
+    except Exception:
+        out["adx"] = np.nan
     out["obv"] = OnBalanceVolumeIndicator(close, volume).on_balance_volume()
-    out["vwap_approx"] = ((high + low + close) / 3 * volume).cumsum() / volume.replace(0, np.nan).cumsum()
+    vol_cum = volume.replace(0, np.nan).cumsum()
+    out["vwap_approx"] = ((high + low + close) / 3 * volume).cumsum() / vol_cum.replace(0, np.nan)
     return out
+
+
+def _ready_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop only rows missing core signal fields (not optional ones)."""
+    ind = compute_indicators(df)
+    core = ["Close", "ema9", "ema21", "ema50", "rsi", "macd", "macd_signal", "macd_hist", "atr"]
+    return ind.dropna(subset=[c for c in core if c in ind.columns])
 
 
 def analyze_cash(symbol: str, timeframe: str = "intraday") -> SignalResult:
     """Score BUY/SELL/HOLD from stacked technicals."""
+    attempts: list[tuple[str, str, str]] = []
     if timeframe == "intraday":
-        period, interval = "5d", "5m"
+        attempts = [
+            ("intraday", "5d", "5m"),
+            ("intraday-15m", "10d", "15m"),
+            ("daily-fallback", "6mo", "1d"),
+            ("daily-fallback", "1y", "1d"),
+        ]
     elif timeframe == "swing":
-        period, interval = "3mo", "1d"
+        attempts = [("swing", "6mo", "1d"), ("swing", "1y", "1d")]
     else:
-        period, interval = "6mo", "1d"
+        attempts = [("daily", "6mo", "1d"), ("daily", "1y", "1d")]
 
-    try:
-        df = fetch_ohlcv(symbol, period=period, interval=interval)
-    except Exception:
-        # Fallback to daily if intraday bars unavailable
-        df = fetch_ohlcv(symbol, period="3mo", interval="1d")
-        timeframe = "daily-fallback"
+    last_err: Exception | None = None
+    df = None
+    used_tf = timeframe
+    for label, period, interval in attempts:
+        try:
+            candidate = fetch_ohlcv(symbol, period=period, interval=interval)
+            ready = _ready_indicators(candidate)
+            if len(ready) >= 2:
+                df = candidate
+                used_tf = label
+                ind = ready
+                break
+        except Exception as exc:
+            last_err = exc
+            continue
+    else:
+        raise ValueError(
+            f"Insufficient data for {symbol}"
+            + (f" ({last_err})" if last_err else "")
+        )
 
     demo = bool(getattr(df, "attrs", {}).get("demo"))
-    ind = compute_indicators(df).dropna()
-    if ind.empty:
-        raise ValueError(f"Insufficient data for {symbol}")
-
+    # ind already set in loop
     row = ind.iloc[-1]
     prev = ind.iloc[-2]
     price = float(row["Close"])
@@ -250,8 +286,10 @@ def analyze_cash(symbol: str, timeframe: str = "intraday") -> SignalResult:
     score = 0.0
     if demo:
         reasons.append("Demo/synthetic candles (live Yahoo feed unavailable)")
+    if used_tf.startswith("daily"):
+        reasons.append(f"Using {used_tf} (intraday bars incomplete for this symbol)")
 
-    # Trend: EMA stack
+    timeframe = used_tf
     if row["ema9"] > row["ema21"] > row["ema50"]:
         score += 2
         reasons.append("Bullish EMA stack (9 > 21 > 50)")

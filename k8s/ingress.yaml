@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vanyaai
+  namespace: vanyaai
+  annotations:
+    # nginx ingress + cert-manager (adjust for your cloud)
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - www.vanyaai.com
+        - vanyaai.com
+      secretName: vanyaai-tls
+  rules:
+    - host: www.vanyaai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vanyaai
+                port:
+                  number: 80
+    - host: vanyaai.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vanyaai
+                port:
+                  number: 80

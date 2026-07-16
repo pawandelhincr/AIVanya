@@ -92,18 +92,35 @@ def suggest_option_trade(symbol: str, bias: str | None = None) -> dict[str, Any]
     Suggest CE buy / PE buy / writing based on cash signal + Greeks.
     bias: BUY | SELL | None (auto from technicals)
     """
-    cash = analyze_cash(symbol, timeframe="intraday")
+    # Indices often lack clean 5m history — use daily if needed
+    try:
+        cash = analyze_cash(symbol, timeframe="intraday")
+    except Exception:
+        cash = analyze_cash(symbol, timeframe="swing")
+
     q = quote(symbol)
-    spot = q["price"] or cash.price
+    spot = float(q.get("price") or cash.price or 0)
+    if spot <= 0:
+        raise ValueError(f"No spot price for {symbol}")
     signal = bias or cash.signal
 
-    iv = estimate_iv(symbol)
+    try:
+        iv = estimate_iv(symbol)
+    except Exception:
+        iv = 0.18
+
     expiry = nearest_expiry()
     t_years = max((expiry - datetime.now()).total_seconds() / (365 * 24 * 3600), 1 / 365)
     rate = 0.065
 
-    # Strike selection by intent
-    step = 100 if spot > 5000 else (50 if spot > 500 else 10)
+    # Index options: NIFTY/BANKNIFTY use 50/100 steps
+    sym_u = symbol.upper()
+    if sym_u in ("NIFTY", "NIFTY50"):
+        step = 50
+    elif sym_u in ("BANKNIFTY", "NIFTYBANK"):
+        step = 100
+    else:
+        step = 100 if spot > 5000 else (50 if spot > 500 else 10)
     atm = round_strike(spot, step)
 
     if signal == "BUY":

@@ -61,7 +61,19 @@ def health():
 
 @router.post("/chat")
 async def chat(body: ChatIn, user=Depends(require_active_user)):
-    result = await handle_chat(body.message)
+    try:
+        result = await handle_chat(body.message)
+    except Exception as exc:
+        return {
+            "reply": f"Server error while handling chat: {exc}",
+            "data": {"error": str(exc)},
+            "suggestions": ["help", "RELIANCE buy?", "weekly stocks"],
+            "user": {
+                "name": user["name"],
+                "status": user["status"],
+                "days_left": user["days_left"],
+            },
+        }
     result["user"] = {
         "name": user["name"],
         "status": user["status"],
@@ -77,12 +89,18 @@ def get_quote(symbol: str, user=Depends(require_active_user)):
 
 @router.get("/signal/{symbol}")
 def get_signal(symbol: str, timeframe: str = "intraday", user=Depends(require_active_user)):
-    return signal_to_dict(analyze_cash(symbol, timeframe=timeframe))
+    try:
+        return signal_to_dict(analyze_cash(symbol, timeframe=timeframe))
+    except Exception as exc:
+        return {"symbol": symbol.upper(), "error": str(exc), "signal": "HOLD", "confidence": 0}
 
 
 @router.get("/options/{symbol}")
 def get_options(symbol: str, user=Depends(require_active_user)):
-    return suggest_option_trade(symbol)
+    try:
+        return suggest_option_trade(symbol)
+    except Exception as exc:
+        return {"symbol": symbol.upper(), "error": str(exc), "action": "HOLD"}
 
 
 @router.get("/greeks/{symbol}")

@@ -374,15 +374,22 @@ async def handle_chat(message: str) -> dict[str, Any]:
             )
             return {"reply": reply, "data": data, "suggestions": [f"{symbol} options", "weekly stocks"]}
 
-        data["option"] = suggest_option_trade(symbol)
-        data["news"] = news_impact_summary(symbol)
-        reply = _format_option(data["option"])
-        suggestions = [
-            f"buy 1 {symbol} {data['option']['option']['type']} {int(data['option']['option']['strike'])}",
-            f"{symbol} news",
-            "account",
-        ]
-        return {"reply": reply, "data": data, "suggestions": suggestions}
+        try:
+            data["option"] = suggest_option_trade(symbol)
+            data["news"] = news_impact_summary(symbol)
+            reply = _format_option(data["option"])
+            suggestions = [
+                f"buy 1 {symbol} {data['option']['option']['type']} {int(data['option']['option']['strike'])}",
+                f"{symbol} news",
+                "account",
+            ]
+            return {"reply": reply, "data": data, "suggestions": suggestions}
+        except Exception as exc:
+            return {
+                "reply": f"**{symbol} options** abhi nahi ban paya: {exc}\n\nDubara try karo ya stock name check karo.",
+                "data": data,
+                "suggestions": ["weekly stocks", "RELIANCE options", "help"],
+            }
 
     # News
     if _wants(text, "news", "headline", "impact", "samachar"):

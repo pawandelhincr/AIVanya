@@ -28,7 +28,26 @@ Browser: http://127.0.0.1:8000
 
 Agar port busy ho to `--port 8001` use karo.
 
-> **Note:** Agar Yahoo Finance block/rate-limit ho (common on some networks), bot automatically **demo candles** use karta hai taaki UI/chat kaam karta rahe. Live prices ke liye network allow karo ya baad mein NSE/broker data feed plug kar sakte ho.
+> **Note:** Agar Yahoo Finance block/rate-limit ho (common on some networks), bot automatically **demo candles** use karta hai taaki UI/chat kaam karta rahe. Live prices ke liye **Zerodha/Dhan connect** karo (preferred) ya Yahoo allow karo.
+
+## Public URL (internet pe share)
+
+Local PC se public HTTPS link (quick demo):
+
+1. Server chalu rakho: `python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8001 --reload`
+2. Double-click `public.bat` **ya**:
+
+```powershell
+.\tools\cloudflared.exe tunnel --url http://127.0.0.1:8001
+```
+
+3. Terminal mein `https://xxxx.trycloudflare.com` dikhega — yeh **public URL** hai.
+4. `.env` mein set karo: `PUBLIC_BASE_URL=https://xxxx.trycloudflare.com`
+5. Zerodha redirect URL bhi same public URL pe update karo.
+
+Permanent hosting (recommended): Render / Railway / VPS pe deploy + apna domain.
+
+**Security:** Public URL pe admin password, API keys, paper/live trading careful. Strong password rakho.
 
 ## Chat examples
 

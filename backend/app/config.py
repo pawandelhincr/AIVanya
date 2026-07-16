@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     admin_password: str = ""
     admin_name: str = "Admin"
 
+    # Public base URL for tunnels / production (e.g. https://xxxx.trycloudflare.com)
+    public_base_url: str = ""
+
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
 
     class Config:

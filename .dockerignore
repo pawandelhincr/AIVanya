@@ -1,0 +1,13 @@
+.venv
+.git
+data
+*.db
+__pycache__
+*.pyc
+.env
+tools
+server.log
+**/.pytest_cache
+**/__pycache__
+agent-transcripts
+*.md

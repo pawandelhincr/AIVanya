@@ -287,10 +287,17 @@ class BrokerService:
                 "docs": "https://kite.trade/docs/connect/v3/",
             }
         url = f"https://kite.zerodha.com/connect/login?v=3&api_key={settings.kite_api_key}"
+        public = (settings.public_base_url or "").rstrip("/")
+        callback_hint = (
+            f"{public}/api/broker/zerodha/callback"
+            if public
+            else "http://127.0.0.1:8001/api/broker/zerodha/callback"
+        )
         return {
             "broker": "zerodha",
             "configured": True,
             "login_url": url,
+            "callback_url": callback_hint,
             "next": "Login ke baad redirect URL se request_token lo, POST /api/broker/zerodha/session",
         }
 
@@ -523,24 +530,41 @@ class BrokerService:
         dhan = self._dhan_client()
         securities = {"NSE_EQ": [int(sec_id) if str(sec_id).isdigit() else sec_id]}
 
-        # Prefer OHLC snapshot (includes LTP + close), else ticker
+        last_err = ""
         block: dict[str, Any] = {}
-        try:
-            resp = dhan.ohlc_data(securities)
-            data = (resp.get("data") if isinstance(resp, dict) else None) or resp or {}
-            nse = data.get("NSE_EQ") or data.get("data", {}).get("NSE_EQ") or {}
-            block = nse.get(str(sec_id)) or nse.get(int(sec_id)) or {}
-        except Exception:
-            block = {}
-
-        if not block:
-            resp = dhan.ticker_data(securities)
-            data = (resp.get("data") if isinstance(resp, dict) else None) or resp or {}
-            nse = data.get("NSE_EQ") or {}
-            block = nse.get(str(sec_id)) or nse.get(int(sec_id)) or {}
+        for method_name in ("ohlc_data", "ticker_data", "quote_data"):
+            try:
+                method = getattr(dhan, method_name, None)
+                if not method:
+                    continue
+                resp = method(securities)
+                if isinstance(resp, dict) and resp.get("status") == "failure":
+                    remarks = resp.get("remarks") or {}
+                    last_err = (
+                        remarks.get("error_message")
+                        or remarks.get("error_code")
+                        or str(remarks)
+                        or "market data failed"
+                    )
+                    continue
+                data = (resp.get("data") if isinstance(resp, dict) else None) or resp or {}
+                if not isinstance(data, dict):
+                    continue
+                nse = data.get("NSE_EQ") or {}
+                if isinstance(nse, dict):
+                    block = nse.get(str(sec_id)) or nse.get(int(sec_id)) or {}
+                if block:
+                    break
+            except Exception as exc:
+                last_err = str(exc)
+                continue
 
         if not isinstance(block, dict) or not block:
-            raise ValueError(f"Dhan quote empty for {symbol} ({sec_id})")
+            raise ValueError(
+                f"Dhan live quote fail for {symbol} ({sec_id}). "
+                f"{last_err or 'Empty response'}. "
+                "web.dhan.co → Access DhanHQ APIs → Data APIs subscribe karo (LTP ke liye zaroori)."
+            )
 
         price = float(
             block.get("last_price")
