@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException
 
-from ..services.auth import auth
+from .services.auth import auth
 
 
 def get_token(

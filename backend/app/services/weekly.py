@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import settings
-from .market import WATCHLIST, compute_indicators, fetch_ohlcv
+from .market import WATCHLIST, compute_indicators, fetch_ohlcv, quote
 
 
 def _weekly_features(symbol: str) -> dict[str, Any] | None:
@@ -15,6 +15,11 @@ def _weekly_features(symbol: str) -> dict[str, Any] | None:
         df = fetch_ohlcv(symbol, period="6mo", interval="1d")
     except Exception:
         return None
+
+    is_demo = bool(getattr(df, "attrs", {}).get("demo"))
+    if is_demo:
+        return None  # weekly picks need real market prices
+
     if len(df) < 40:
         return None
 
@@ -23,22 +28,23 @@ def _weekly_features(symbol: str) -> dict[str, Any] | None:
         return None
 
     close = ind["Close"]
-    # Rolling 5-session returns distribution
     weekly_ret = close.pct_change(5).dropna()
     hit_rate = float((weekly_ret >= settings.weekly_target_return_pct / 100).mean())
     avg_weekly = float(weekly_ret.mean() * 100)
     vol = float(weekly_ret.std() * 100)
     last = ind.iloc[-1]
-    price = float(last["Close"])
+    hist_price = float(last["Close"])
 
-    # Momentum + mean-reversion blend score for next-week potential
+    # Live LTP for display (more accurate than last daily close)
+    q = quote(symbol)
+    price = float(q["price"]) if q.get("price") else hist_price
+    data_source = q.get("source") or getattr(df, "attrs", {}).get("source", "unknown")
+
     rsi = float(last["rsi"])
     macd_hist = float(last["macd_hist"])
     ema_bull = float(last["ema9"] > last["ema21"] > last["ema50"])
-    distance_from_low = (price - float(ind["Close"].tail(20).min())) / price
     bb_pos = (price - float(last["bb_low"])) / max(float(last["bb_high"] - last["bb_low"]), 1e-6)
 
-    # Higher score = more interesting for delivery swing toward target
     score = 0.0
     reasons: list[str] = []
 
@@ -70,21 +76,25 @@ def _weekly_features(symbol: str) -> dict[str, Any] | None:
         score -= 1
         reasons.append("Low weekly volatility — 8% less realistic")
 
-    # Expected move estimate (not a guarantee)
     expected = avg_weekly + 0.5 * vol * (1 if ema_bull else 0.3)
     expected = float(np.clip(expected, -5, 15))
 
     atr = float(last["atr"])
+    atr_pct = (atr / price) if price else 0.015
     return {
         "symbol": symbol,
         "price": round(price, 2),
+        "ltp": round(price, 2),
+        "prev_close": round(float(q.get("previous_close") or hist_price), 2),
+        "change_pct": round(float(q.get("change_pct") or 0), 2),
+        "data_source": data_source,
         "score": round(score, 2),
         "expected_weekly_move_pct": round(expected, 2),
         "hist_hit_rate_8pct": round(hit_rate * 100, 1),
         "avg_weekly_return_pct": round(avg_weekly, 2),
         "weekly_vol_pct": round(vol, 2),
         "rsi": round(rsi, 2),
-        "stop_loss": round(price - 1.8 * atr, 2),
+        "stop_loss": round(price * (1 - 1.8 * atr_pct), 2),
         "target_8pct": round(price * (1 + settings.weekly_target_return_pct / 100), 2),
         "reasons": reasons,
         "horizon": "5 trading sessions (delivery)",
@@ -101,10 +111,19 @@ def weekly_delivery_picks(top_n: int = 5, universe: list[str] | None = None) -> 
             scored.append(feat)
     scored.sort(key=lambda x: (x["score"], x["expected_weekly_move_pct"]), reverse=True)
     top = scored[:top_n]
+    sources = {p.get("data_source") for p in top if p.get("data_source")}
+    if sources & {"zerodha", "dhan"}:
+        data_note = f"Live LTP from your trading account ({', '.join(sorted(sources & {'zerodha', 'dhan'}))})."
+    else:
+        data_note = (
+            "Broker not connected — showing Yahoo fallback prices. "
+            "Connect Zerodha/Dhan for account live LTP."
+        )
     return {
         "target_return_pct": settings.weekly_target_return_pct,
         "count": len(top),
         "picks": top,
+        "data_note": data_note,
         "method": "Momentum + historical 5-day hit-rate + RSI/MACD/EMA filter",
         "warning": (
             "8% in one week is aggressive. Most weeks you will not hit it. "

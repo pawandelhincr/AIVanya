@@ -122,6 +122,25 @@ def broker_status(user=Depends(require_active_user)):
     return broker.status()
 
 
+@router.get("/broker/live/{symbol}")
+def broker_live_quote(symbol: str, user=Depends(require_active_user)):
+    q = broker.live_quote(symbol)
+    if not q:
+        return {
+            "ok": False,
+            "symbol": symbol.upper(),
+            "message": "Broker connected nahi hai ya quote fail. Pehle Zerodha/Dhan connect karo.",
+            "fallback": quote(symbol),
+        }
+    return {"ok": True, **q}
+
+
+@router.get("/broker/live")
+def broker_live_quotes(symbols: str = "RELIANCE,TCS,SBIN", user=Depends(require_active_user)):
+    syms = [s.strip() for s in symbols.split(",") if s.strip()]
+    return broker.live_quotes(syms)
+
+
 @router.post("/account/mode")
 def set_mode(body: ModeIn, user=Depends(require_active_user)):
     return broker.set_mode(body.mode)

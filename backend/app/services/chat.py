@@ -119,15 +119,25 @@ def _format_option(opt: dict[str, Any]) -> str:
 def _format_weekly(data: dict[str, Any]) -> str:
     lines = [
         f"**Weekly delivery picks** (target ~{data['target_return_pct']}% — aspirational)",
+        data.get("data_note", ""),
         data["warning"],
         "",
     ]
+    if not data.get("picks"):
+        lines.append("Abhi live market data nahi mila — thodi der baad dubara try karo.")
+        lines.append("")
+        lines.append(DISCLAIMER)
+        return "\n".join(lines)
+
     for i, p in enumerate(data["picks"], 1):
+        chg = p.get("change_pct")
+        chg_txt = f" ({chg:+.2f}%)" if chg is not None else ""
         lines.append(
-            f"{i}. **{p['symbol']}** ₹{p['price']} | score {p['score']} | "
+            f"{i}. **{p['symbol']}** LTP ₹{p['price']}{chg_txt} | score {p['score']} | "
             f"exp move ~{p['expected_weekly_move_pct']}% | "
             f"hist 8% hit {p['hist_hit_rate_8pct']}% | "
             f"SL ₹{p['stop_loss']} → Tgt ₹{p['target_8pct']}"
+            f" [{p.get('data_source') or 'market'}]"
         )
         if p["reasons"]:
             lines.append(f"   – {p['reasons'][0]}")
@@ -227,6 +237,8 @@ async def handle_chat(message: str) -> dict[str, Any]:
                 f"Keys configured: {z['configured_keys']} | Connected: {z['connected']}",
                 f"User: {z.get('user_id') or '—'}",
                 "",
+                "Connect hone ke baad **live LTP** Zerodha account se aayega (weekly/cash/options).",
+                "",
                 "Steps:",
                 "1. developers.kite.trade pe app → API key/secret `.env` mein",
                 "2. Redirect URL: `http://127.0.0.1:8001/api/broker/zerodha/callback`",
@@ -253,6 +265,8 @@ async def handle_chat(message: str) -> dict[str, Any]:
                 "**DhanHQ**",
                 f"Configured: {d['configured_keys']} | Connected: {d['connected']}",
                 f"Client: {d.get('client_id') or '—'}",
+                "",
+                "Connect hone ke baad **live LTP** Dhan account se aayega.",
                 "",
                 "Steps:",
                 "1. web.dhan.co → Profile → Access DhanHQ APIs → token",
@@ -327,13 +341,12 @@ async def handle_chat(message: str) -> dict[str, Any]:
             except Exception as exc:
                 return {"reply": f"Order failed: {exc}", "data": {}, "suggestions": ["account"]}
 
-    # Weekly delivery
+    # Weekly delivery — never LLM-polish (model can hallucinate wrong LTP/prices)
     if _wants(text, "weekly", "delivery", "8%", "8 percent", "hafta", "swing pick"):
         data["weekly"] = weekly_delivery_picks(top_n=5)
         reply = _format_weekly(data["weekly"])
-        polished = await _optional_llm_polish(text, data)
         return {
-            "reply": polished or reply,
+            "reply": reply,
             "data": data,
             "suggestions": ["buy 5 " + data["weekly"]["picks"][0]["symbol"] if data["weekly"]["picks"] else "account"],
         }
@@ -364,13 +377,12 @@ async def handle_chat(message: str) -> dict[str, Any]:
         data["option"] = suggest_option_trade(symbol)
         data["news"] = news_impact_summary(symbol)
         reply = _format_option(data["option"])
-        polished = await _optional_llm_polish(text, data)
         suggestions = [
             f"buy 1 {symbol} {data['option']['option']['type']} {int(data['option']['option']['strike'])}",
             f"{symbol} news",
             "account",
         ]
-        return {"reply": polished or reply, "data": data, "suggestions": suggestions}
+        return {"reply": reply, "data": data, "suggestions": suggestions}
 
     # News
     if _wants(text, "news", "headline", "impact", "samachar"):
@@ -396,9 +408,8 @@ async def handle_chat(message: str) -> dict[str, Any]:
         data["news"] = news
         data["quote"] = quote(symbol)
         reply = _format_cash(sig, news)
-        polished = await _optional_llm_polish(text, data)
         return {
-            "reply": polished or reply,
+            "reply": reply,
             "data": data,
             "suggestions": [f"{symbol} options", f"{symbol} news", "weekly stocks"],
         }

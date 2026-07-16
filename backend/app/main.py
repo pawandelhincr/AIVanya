@@ -10,7 +10,7 @@ from .config import settings
 from .routers.api import router
 from .routers.auth import router as auth_router
 from .services.broker import init_db
-from .services.auth import init_auth_db
+from .services.auth import init_auth_db, ensure_admin_user
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
@@ -36,6 +36,7 @@ if static_dir.exists():
 def startup() -> None:
     init_db()
     init_auth_db()
+    ensure_admin_user()
 
 
 @app.get("/", response_class=HTMLResponse)

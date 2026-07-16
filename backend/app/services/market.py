@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import httpx
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -14,6 +15,14 @@ from ta.volume import OnBalanceVolumeIndicator
 
 
 NSE_SUFFIX = ".NS"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
 
 # Liquid F&O / cash names commonly used for intraday
 WATCHLIST = [
@@ -49,6 +58,70 @@ def _yf_symbol(symbol: str) -> str:
     return f"{s}{NSE_SUFFIX}"
 
 
+def _period_to_range(period: str) -> str:
+    mapping = {
+        "1d": "1d",
+        "5d": "5d",
+        "1mo": "1mo",
+        "3mo": "3mo",
+        "6mo": "6mo",
+        "1y": "1y",
+        "2y": "2y",
+    }
+    return mapping.get(period, period)
+
+
+def _fetch_yahoo_chart(symbol: str, period: str = "3mo", interval: str = "1d") -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Direct Yahoo chart API — works when yfinance library is blocked."""
+    ysym = _yf_symbol(symbol)
+    params = {"interval": interval, "range": _period_to_range(period)}
+    url = YAHOO_CHART_URL.format(symbol=ysym)
+    with httpx.Client(timeout=20, headers=HTTP_HEADERS, follow_redirects=True) as client:
+        resp = client.get(url, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    result = (payload.get("chart") or {}).get("result") or []
+    if not result:
+        raise ValueError(f"No chart data for {symbol}")
+
+    block = result[0]
+    meta = block.get("meta") or {}
+    timestamps = block.get("timestamp") or []
+    quote = (block.get("indicators") or {}).get("quote") or [{}]
+    q0 = quote[0] if quote else {}
+
+    if not timestamps:
+        raise ValueError(f"No timestamps for {symbol}")
+
+    idx = pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("Asia/Kolkata")
+    df = pd.DataFrame(
+        {
+            "Open": q0.get("open", []),
+            "High": q0.get("high", []),
+            "Low": q0.get("low", []),
+            "Close": q0.get("close", []),
+            "Volume": q0.get("volume", []),
+        },
+        index=idx,
+    )
+    df = df.dropna()
+    if df.empty:
+        raise ValueError(f"Empty chart rows for {symbol}")
+
+    df.attrs["demo"] = False
+    df.attrs["source"] = "yahoo_chart"
+    return df, meta
+
+
+def _live_price_from_meta(meta: dict[str, Any], df: pd.DataFrame) -> float:
+    for key in ("regularMarketPrice", "previousClose", "chartPreviousClose"):
+        val = meta.get(key)
+        if val:
+            return float(val)
+    return float(df["Close"].iloc[-1])
+
+
 def _synthetic_ohlcv(symbol: str, bars: int = 90, interval: str = "1d") -> pd.DataFrame:
     """Offline demo candles when Yahoo is blocked / unavailable."""
     seed = sum(ord(c) for c in symbol.upper())
@@ -70,6 +143,14 @@ def _synthetic_ohlcv(symbol: str, bars: int = 90, interval: str = "1d") -> pd.Da
 
 
 def fetch_ohlcv(symbol: str, period: str = "3mo", interval: str = "1d") -> pd.DataFrame:
+    # 1) Direct Yahoo chart API (most reliable on Indian networks)
+    try:
+        df, _ = _fetch_yahoo_chart(symbol, period=period, interval=interval)
+        return df
+    except Exception:
+        pass
+
+    # 2) yfinance library fallback
     ysym = _yf_symbol(symbol)
     df = pd.DataFrame()
     try:
@@ -93,19 +174,22 @@ def fetch_ohlcv(symbol: str, period: str = "3mo", interval: str = "1d") -> pd.Da
         except Exception:
             df = pd.DataFrame()
 
-    if df is None or df.empty:
-        # Keep the bot usable offline / when Yahoo rate-limits India IPs
-        bars = 78 if "m" in interval else 90
-        df = _synthetic_ohlcv(symbol, bars=bars, interval=interval)
-        df.attrs["demo"] = True
-    else:
-        df.attrs["demo"] = False
+    if df is not None and not df.empty:
+        df = df.rename(columns=str.title)
+        needed = {"Open", "High", "Low", "Close", "Volume"}
+        missing = needed - set(df.columns)
+        if not missing:
+            df = df.dropna()
+            df.attrs["demo"] = False
+            df.attrs["source"] = "yfinance"
+            return df
 
+    # 3) Synthetic only as last resort (not for production pricing)
+    bars = 78 if "m" in interval else 90
+    df = _synthetic_ohlcv(symbol, bars=bars, interval=interval)
+    df.attrs["demo"] = True
+    df.attrs["source"] = "synthetic"
     df = df.rename(columns=str.title)
-    needed = {"Open", "High", "Low", "Close", "Volume"}
-    missing = needed - set(df.columns)
-    if missing:
-        raise ValueError(f"Incomplete market data for {symbol}: missing {missing}")
     return df.dropna()
 
 
@@ -276,18 +360,43 @@ def analyze_cash(symbol: str, timeframe: str = "intraday") -> SignalResult:
 
 
 def quote(symbol: str) -> dict[str, Any]:
+    # 1) Prefer live LTP from connected trading account (Zerodha / Dhan)
     try:
-        t = yf.Ticker(_yf_symbol(symbol))
-        info = t.fast_info
-        price = float(getattr(info, "last_price", None) or getattr(info, "lastPrice", 0) or 0)
-        prev = float(getattr(info, "previous_close", None) or getattr(info, "previousClose", 0) or 0)
-        currency = getattr(info, "currency", "INR")
+        from .broker import broker as _broker
+
+        live = _broker.live_quote(symbol)
+        if live and live.get("price"):
+            return live
     except Exception:
-        price = prev = 0.0
-        currency = "INR"
+        pass
+
+    demo = False
+    source = "yahoo_chart"
+    price = prev = 0.0
+    currency = "INR"
+
+    try:
+        df, meta = _fetch_yahoo_chart(symbol, period="5d", interval="1d")
+        price = _live_price_from_meta(meta, df)
+        prev = float(meta.get("previousClose") or meta.get("chartPreviousClose") or 0)
+        if not prev and len(df) > 1:
+            prev = float(df["Close"].iloc[-2])
+        currency = str(meta.get("currency") or "INR")
+    except Exception:
+        try:
+            t = yf.Ticker(_yf_symbol(symbol))
+            info = t.fast_info
+            price = float(getattr(info, "last_price", None) or getattr(info, "lastPrice", 0) or 0)
+            prev = float(getattr(info, "previous_close", None) or getattr(info, "previousClose", 0) or 0)
+            currency = getattr(info, "currency", "INR")
+            source = "yfinance"
+        except Exception:
+            price = prev = 0.0
 
     if not price:
         df = fetch_ohlcv(symbol, period="1mo", interval="1d")
+        demo = bool(getattr(df, "attrs", {}).get("demo"))
+        source = str(getattr(df, "attrs", {}).get("source") or "unknown")
         price = float(df["Close"].iloc[-1])
         prev = float(df["Close"].iloc[-2]) if len(df) > 1 else price
 
@@ -298,6 +407,9 @@ def quote(symbol: str) -> dict[str, Any]:
         "previous_close": round(prev, 2),
         "change_pct": round(change_pct, 2),
         "currency": currency,
+        "demo_data": demo,
+        "source": source,
+        "broker": None,
     }
 
 

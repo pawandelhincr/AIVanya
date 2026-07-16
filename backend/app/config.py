@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
 
+    # Default admin (created/updated on startup)
+    admin_email: str = ""
+    admin_password: str = ""
+    admin_name: str = "Admin"
+
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
 
     class Config:

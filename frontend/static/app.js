@@ -84,17 +84,18 @@ function showApp() {
 
 function renderSub(user) {
   if (!user || !subBox) return;
-  const label =
-    user.status === "trial"
+  const label = user.is_admin
+    ? "Admin · full access"
+    : user.status === "trial"
       ? `Trial · ${user.days_left} day(s) left`
       : user.status === "active"
         ? `Pro · ${user.days_left} day(s) left`
         : "Expired — upgrade needed";
   subBox.innerHTML = `
-    <div><strong>${user.name}</strong></div>
+    <div><strong>${user.name}</strong>${user.is_admin ? " <span style='color:#0f6b4c'>(Admin)</span>" : ""}</div>
     <div>${user.email}</div>
     <div>${label}</div>
-    <div style="font-size:0.8rem;color:#5c6b64;margin-top:4px">Plan: ₹999 / 3 months after trial</div>
+    ${user.is_admin ? "" : `<div style="font-size:0.8rem;color:#5c6b64;margin-top:4px">Plan: ₹999 / 3 months after trial</div>`}
   `;
 }
 
@@ -161,9 +162,11 @@ async function refreshAccount() {
     `;
     const z = st.brokers.zerodha;
     const d = st.brokers.dhan;
+    const liveSrc = z.connected ? "Zerodha LTP" : d.connected ? "Dhan LTP" : "Yahoo fallback";
     brokerBox.innerHTML = `
       <div><span class="dot ${z.connected ? "on" : "off"}"></span><strong>Zerodha</strong> ${z.connected ? "connected" : "off"}</div>
       <div><span class="dot ${d.connected ? "on" : "off"}"></span><strong>Dhan</strong> ${d.connected ? "connected" : "off"}</div>
+      <div style="margin-top:6px;font-size:0.8rem;color:#5c6b64"><strong>Live price:</strong> ${liveSrc}</div>
     `;
   } catch {
     /* gated / logged out */

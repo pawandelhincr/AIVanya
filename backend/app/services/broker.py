@@ -431,6 +431,161 @@ class BrokerService:
             "Map update karo ya security_id manually pass karo."
         )
 
+    def _normalize_eq_symbol(self, symbol: str) -> str:
+        return (
+            symbol.upper()
+            .replace(".NS", "")
+            .replace(".BO", "")
+            .replace(" ", "")
+            .strip()
+        )
+
+    def live_quote(self, symbol: str, prefer: str | None = None) -> dict[str, Any] | None:
+        """
+        Live LTP from connected trading account (Zerodha / Dhan).
+        Returns None if no broker connected or quote fails.
+        """
+        sym = self._normalize_eq_symbol(symbol)
+        if sym in ("NIFTY", "NIFTY50"):
+            kite_key = "NSE:NIFTY 50"
+        elif sym in ("BANKNIFTY", "NIFTYBANK"):
+            kite_key = "NSE:NIFTY BANK"
+        else:
+            kite_key = f"NSE:{sym}"
+
+        order: list[str] = []
+        active = (prefer or self.account_summary().get("active_broker") or "").lower()
+        if active in ("zerodha", "dhan"):
+            order.append(active)
+        for b in ("zerodha", "dhan"):
+            if b not in order and self._broker_connected(b):
+                order.append(b)
+
+        errors: list[str] = []
+        for b in order:
+            try:
+                if b == "zerodha":
+                    return self._zerodha_live_quote(sym, kite_key)
+                if b == "dhan":
+                    return self._dhan_live_quote(sym)
+            except Exception as exc:
+                errors.append(f"{b}: {exc}")
+                continue
+        return None
+
+    def _zerodha_live_quote(self, symbol: str, kite_key: str) -> dict[str, Any]:
+        kite = self._kite_client()
+        # Prefer full quote (LTP + OHLC), fall back to LTP
+        try:
+            data = kite.quote(kite_key)
+            block = data.get(kite_key) or {}
+            if not block:
+                raise ValueError(f"No Zerodha quote for {kite_key}")
+            price = float(block.get("last_price") or 0)
+            ohlc = block.get("ohlc") or {}
+            prev = float(ohlc.get("close") or 0)
+            if not price:
+                raise ValueError("Zerodha last_price empty")
+            change_pct = ((price - prev) / prev * 100) if prev else 0.0
+            return {
+                "symbol": symbol,
+                "price": round(price, 2),
+                "previous_close": round(prev, 2),
+                "change_pct": round(change_pct, 2),
+                "currency": "INR",
+                "demo_data": False,
+                "source": "zerodha",
+                "broker": "zerodha",
+                "instrument": kite_key,
+                "volume": block.get("volume"),
+                "ohlc": ohlc,
+            }
+        except Exception:
+            ltp_map = kite.ltp(kite_key)
+            block = ltp_map.get(kite_key) or {}
+            price = float(block.get("last_price") or 0)
+            if not price:
+                raise ValueError(f"Zerodha LTP empty for {kite_key}")
+            return {
+                "symbol": symbol,
+                "price": round(price, 2),
+                "previous_close": 0.0,
+                "change_pct": 0.0,
+                "currency": "INR",
+                "demo_data": False,
+                "source": "zerodha",
+                "broker": "zerodha",
+                "instrument": kite_key,
+            }
+
+    def _dhan_live_quote(self, symbol: str) -> dict[str, Any]:
+        sec_id = self.resolve_dhan_security_id(symbol)
+        dhan = self._dhan_client()
+        securities = {"NSE_EQ": [int(sec_id) if str(sec_id).isdigit() else sec_id]}
+
+        # Prefer OHLC snapshot (includes LTP + close), else ticker
+        block: dict[str, Any] = {}
+        try:
+            resp = dhan.ohlc_data(securities)
+            data = (resp.get("data") if isinstance(resp, dict) else None) or resp or {}
+            nse = data.get("NSE_EQ") or data.get("data", {}).get("NSE_EQ") or {}
+            block = nse.get(str(sec_id)) or nse.get(int(sec_id)) or {}
+        except Exception:
+            block = {}
+
+        if not block:
+            resp = dhan.ticker_data(securities)
+            data = (resp.get("data") if isinstance(resp, dict) else None) or resp or {}
+            nse = data.get("NSE_EQ") or {}
+            block = nse.get(str(sec_id)) or nse.get(int(sec_id)) or {}
+
+        if not isinstance(block, dict) or not block:
+            raise ValueError(f"Dhan quote empty for {symbol} ({sec_id})")
+
+        price = float(
+            block.get("last_price")
+            or block.get("LTP")
+            or block.get("ltp")
+            or 0
+        )
+        ohlc = block.get("ohlc") or {}
+        prev = float(
+            ohlc.get("close")
+            or block.get("close")
+            or block.get("previous_close")
+            or 0
+        )
+        if not price:
+            raise ValueError(f"Dhan LTP empty for {symbol}")
+        change_pct = ((price - prev) / prev * 100) if prev else 0.0
+        return {
+            "symbol": symbol,
+            "price": round(price, 2),
+            "previous_close": round(prev, 2),
+            "change_pct": round(change_pct, 2),
+            "currency": "INR",
+            "demo_data": False,
+            "source": "dhan",
+            "broker": "dhan",
+            "security_id": sec_id,
+            "ohlc": ohlc or None,
+        }
+
+    def live_quotes(self, symbols: list[str]) -> dict[str, Any]:
+        out: dict[str, Any] = {"broker_connected": False, "quotes": {}, "errors": {}}
+        st = self.status()
+        out["active_broker"] = st.get("active_broker")
+        out["broker_connected"] = bool(
+            st["brokers"]["zerodha"]["connected"] or st["brokers"]["dhan"]["connected"]
+        )
+        for sym in symbols:
+            q = self.live_quote(sym)
+            if q:
+                out["quotes"][sym.upper()] = q
+            else:
+                out["errors"][sym.upper()] = "Broker not connected or quote unavailable"
+        return out
+
     # ── Orders ──────────────────────────────────────────────
     def place_order(
         self,
@@ -461,7 +616,11 @@ class BrokerService:
         fill_price = price
         if fill_price is None:
             try:
-                fill_price = quote(symbol)["price"]
+                live = self.live_quote(symbol)
+                if live and live.get("price"):
+                    fill_price = live["price"]
+                else:
+                    fill_price = quote(symbol)["price"]
             except Exception:
                 fill_price = 0.0
             if segment in ("OPT", "NFO") and option_type:

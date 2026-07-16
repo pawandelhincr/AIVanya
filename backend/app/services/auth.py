@@ -58,7 +58,8 @@ def init_auth_db() -> None:
                 trial_ends_at TEXT NOT NULL,
                 plan_code TEXT,
                 plan_expires_at TEXT,
-                status TEXT NOT NULL DEFAULT 'trial'
+                status TEXT NOT NULL DEFAULT 'trial',
+                role TEXT NOT NULL DEFAULT 'user'
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
@@ -83,6 +84,61 @@ def init_auth_db() -> None:
             );
             """
         )
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "role" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+
+
+def ensure_admin_user() -> None:
+    """Create or refresh admin account from .env settings."""
+    email = (settings.admin_email or "").strip().lower()
+    password = settings.admin_password or ""
+    if not email or not password:
+        return
+
+    now = _utcnow()
+    far_future = now + timedelta(days=3650)  # ~10 years admin access
+    name = (settings.admin_name or "Admin").strip() or "Admin"
+
+    with _conn() as conn:
+        row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        if row:
+            conn.execute(
+                """
+                UPDATE users
+                SET name = ?, password_hash = ?, role = 'admin', status = 'active',
+                    plan_code = ?, plan_expires_at = ?, trial_ends_at = ?
+                WHERE email = ?
+                """,
+                (
+                    name,
+                    _hash_password(password),
+                    PLAN_CODE,
+                    _iso(far_future),
+                    _iso(far_future),
+                    email,
+                ),
+            )
+            return
+
+        conn.execute(
+            """
+            INSERT INTO users (
+                id, name, email, password_hash, created_at, trial_ends_at,
+                plan_code, plan_expires_at, status, role
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 'admin')
+            """,
+            (
+                uuid.uuid4().hex,
+                name,
+                email,
+                _hash_password(password),
+                _iso(now),
+                _iso(far_future),
+                PLAN_CODE,
+                _iso(far_future),
+            ),
+        )
 
 
 def _hash_password(password: str, salt: str | None = None) -> str:
@@ -103,9 +159,36 @@ def _verify_password(password: str, stored: str) -> bool:
 
 def _user_public(row: sqlite3.Row | dict) -> dict[str, Any]:
     d = dict(row)
+    role = (d.get("role") or "user").lower()
+    is_admin = role == "admin"
+
     now = _utcnow()
     trial_ends = _parse(d.get("trial_ends_at"))
     plan_ends = _parse(d.get("plan_expires_at"))
+
+    if is_admin:
+        access_until = plan_ends or trial_ends or (now + timedelta(days=3650))
+        return {
+            "id": d["id"],
+            "name": d["name"],
+            "email": d["email"],
+            "role": "admin",
+            "is_admin": True,
+            "status": "admin",
+            "active": True,
+            "trial_ends_at": d.get("trial_ends_at"),
+            "plan_code": d.get("plan_code") or PLAN_CODE,
+            "plan_expires_at": d.get("plan_expires_at"),
+            "access_until": _iso(access_until) if access_until else None,
+            "days_left": max(0, (access_until - now).days) if access_until else 9999,
+            "plan": {
+                "code": PLAN_CODE,
+                "name": PLAN_NAME,
+                "price_inr": PLAN_PRICE_INR,
+                "duration_days": PLAN_DAYS,
+                "trial_days": TRIAL_DAYS,
+            },
+        }
 
     on_trial = bool(trial_ends and now <= trial_ends and not (plan_ends and now <= plan_ends))
     paid_active = bool(plan_ends and now <= plan_ends)
@@ -126,6 +209,8 @@ def _user_public(row: sqlite3.Row | dict) -> dict[str, Any]:
         "id": d["id"],
         "name": d["name"],
         "email": d["email"],
+        "role": "user",
+        "is_admin": False,
         "status": status,
         "active": active,
         "trial_ends_at": d.get("trial_ends_at"),
@@ -146,6 +231,7 @@ def _user_public(row: sqlite3.Row | dict) -> dict[str, Any]:
 class AuthService:
     def __init__(self) -> None:
         init_auth_db()
+        ensure_admin_user()
 
     def register(self, name: str, email: str, password: str) -> dict[str, Any]:
         name = (name or "").strip()
